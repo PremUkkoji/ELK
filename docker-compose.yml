@@ -34,10 +34,9 @@ services:
         volumes:
             - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
             - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+            - ./springboot-logger/logs:/usr/share/logstash/logs:ro
+            - logstash_data:/usr/share/logstash/data
         ports:
-            - "5044:5044"
-            - "5043:5043/tcp"
-            - "5043:5043/udp"
             - "9600:9600"
         environment:
             LS_JAVA_OPTS: "-Xmx256m -Xms256m"
@@ -46,10 +45,24 @@ services:
         depends_on:
             - elasticsearch
 
+    springboot-logger:
+        build:
+            context: ./springboot-logger
+        environment:
+            LOG_DIR: /var/log/springboot
+        volumes:
+            - ./springboot-logger/logs:/var/log/springboot
+        depends_on:
+            - logstash
+        networks:
+            - elastic
+
 networks:
     elastic:
         driver: bridge
 
 volumes:
     elastic_data:
+        driver: local
+    logstash_data:
         driver: local
