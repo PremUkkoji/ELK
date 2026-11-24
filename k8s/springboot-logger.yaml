@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-logger
+  namespace: elk-k8s
+  labels:
+    app: springboot-logger
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: springboot-logger
+  template:
+    metadata:
+      labels:
+        app: springboot-logger
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: springboot-logger
+          image: elk-springboot-logger:local
+          imagePullPolicy: Never
+          env:
+            - name: LOG_DIR
+              value: /var/log/springboot
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: JAVA_TOOL_OPTIONS
+              value: -XX:MaxRAMPercentage=75.0
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - test -s "/var/log/springboot/${HOSTNAME}.json"
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - test -s "/var/log/springboot/${HOSTNAME}.json"
+            periodSeconds: 10
+            timeoutSeconds: 2
+          volumeMounts:
+            - name: producer-logs
+              mountPath: /var/log/springboot
+      volumes:
+        - name: producer-logs
+          persistentVolumeClaim:
+            claimName: producer-logs

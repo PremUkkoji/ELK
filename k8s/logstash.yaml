@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: elk-k8s
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    path.config: /usr/share/logstash/pipeline
+    pipeline.workers: 1
+    queue.type: persisted
+    path.queue: /usr/share/logstash/data/queue
+    queue.max_bytes: 512mb
+    xpack.monitoring.enabled: false
+  logstash.conf: |
+    input {
+      file {
+        path => "/usr/share/logstash/logs/*.json"
+        start_position => "beginning"
+        sincedb_path => "/usr/share/logstash/data/springboot-sincedb"
+        discover_interval => 5
+        codec => json
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ["http://elasticsearch-service.elk-k8s.svc.cluster.local:9200"]
+        index => "springboot-%{app}"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash-deployment
+  namespace: elk-k8s
+  labels:
+    app: logstash
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.3.3
+          env:
+            - name: LS_JAVA_OPTS
+              value: -Xms256m -Xmx256m
+          ports:
+            - name: monitoring
+              containerPort: 9600
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /
+              port: monitoring
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: monitoring
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: monitoring
+            periodSeconds: 20
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: logstash-config
+              mountPath: /usr/share/logstash/config/logstash.yml
+              subPath: logstash.yml
+              readOnly: true
+            - name: logstash-config
+              mountPath: /usr/share/logstash/pipeline/logstash.conf
+              subPath: logstash.conf
+              readOnly: true
+            - name: producer-logs
+              mountPath: /usr/share/logstash/logs
+              readOnly: true
+            - name: logstash-data
+              mountPath: /usr/share/logstash/data
+      volumes:
+        - name: logstash-config
+          configMap:
+            name: logstash-config
+        - name: producer-logs
+          persistentVolumeClaim:
+            claimName: producer-logs
+        - name: logstash-data
+          persistentVolumeClaim:
+            claimName: logstash-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-service
+  namespace: elk-k8s
+spec:
+  selector:
+    app: logstash
+  type: ClusterIP
+  ports:
+    - name: monitoring
+      protocol: TCP
+      port: 9600
+      targetPort: monitoring
